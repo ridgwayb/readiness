@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Readiness</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
+:root {
+–bg: #F2F2F7; –card: #FFFFFF; –inset: #F2F2F7;
+–ink: #1D1D1F; –ink-2: #8A8A8E; –ink-3: #B0B0B6;
+–sep: rgba(60,60,67,.11);
+–green: #3A7D5F; –amber: #92661E; –red: #A8483A; –blue: #3D6A96;
+–r-card: 18px; –r-in: 10px; –gutter: 20px;
+}
+@media (prefers-color-scheme: dark) {
+:root {
+–bg: #000000; –card: #1C1C1E; –inset: #2C2C2E;
+–ink: #F5F5F7; –ink-2: #98989D; –ink-3: #6A6A70;
+–sep: rgba(84,84,88,.42);
+–green: #74C79E; –amber: #DBA85C; –red: #E28A7C; –blue: #83AFDC;
+}
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+margin: 0; background: var(–bg); color: var(–ink);
+font-family: -apple-system, BlinkMacSystemFont, “SF Pro Display”, “SF Pro Text”, “Helvetica Neue”, Arial, sans-serif;
+font-size: 15px; line-height: 1.47; letter-spacing: -0.01em; -webkit-font-smoothing: antialiased;
+}
+.num { font-variant-numeric: tabular-nums; font-feature-settings: “tnum” 1; }
+
+.app {
+width: 100%; max-width: 430px; min-height: 100vh; margin: 0 auto;
+padding: calc(env(safe-area-inset-top) + 28px) calc(env(safe-area-inset-right) + 18px)
+calc(env(safe-area-inset-bottom) + 40px) calc(env(safe-area-inset-left) + 18px);
+}
+@media (min-width: 500px) {
+body { background: #E3E3E8; }
+@media (prefers-color-scheme: dark) { body { background: #0A0A0C; } }
+.app { background: var(–bg); }
+}
+
+.info {
+position: relative; flex: 0 0 auto;
+width: 19px; height: 19px; padding: 0; margin: 0 0 0 7px;
+border: 1.2px solid var(–ink-3); border-radius: 50%;
+background: none; color: var(–ink-3);
+font: 600 11px/1 -apple-system, BlinkMacSystemFont, sans-serif;
+cursor: pointer; display: inline-flex; align-items: center; justify-content: center;
+transition: color .15s ease, border-color .15s ease;
+}
+.info::after { content: “”; position: absolute; top: -13px; left: -13px; right: -13px; bottom: -13px; }
+.info[aria-expanded=“true”] { color: var(–blue); border-color: var(–blue); }
+@media (prefers-reduced-motion: reduce) { .info { transition: none; } }
+
+.panel {
+background: var(–inset); border-radius: var(–r-in); padding: 13px 15px; margin-top: 11px;
+font-size: 13px; line-height: 1.5; color: var(–ink-2);
+}
+.panel b { color: var(–ink); font-weight: 600; }
+.panel p { margin: 0 0 9px; } .panel p:last-child { margin-bottom: 0; }
+.rows .panel { grid-column: 1 / -1; }
+
+header.top { margin-bottom: 24px; }
+header.top h1 { margin: 0; font-size: 30px; font-weight: 700; letter-spacing: -0.026em; }
+header.top .sub { margin: 3px 0 0; font-size: 15px; color: var(–ink-2); }
+
+section { margin-bottom: 30px; }
+.sechead { margin: 0 0 12px; font-size: 20px; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; }
+.card { background: var(–card); border-radius: var(–r-card); padding: var(–gutter); }
+.card + .card { margin-top: 12px; }
+
+.hero { padding: 26px var(–gutter) var(–gutter); text-align: center; }
+.dial { position: relative; width: 190px; margin: 0 auto; }
+.dial svg { display: block; width: 190px; height: 112px; }
+.dial-read { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; }
+.dial-read .s { font-size: 52px; font-weight: 700; letter-spacing: -0.05em; line-height: 1; }
+.dial-read .s small { font-size: 17px; font-weight: 400; color: var(–ink-2); letter-spacing: -0.01em; }
+.cat { margin: 16px 0 0; font-size: 26px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.15; }
+.sayso { margin: 8px 0 0; font-size: 14.5px; color: var(–ink-2); line-height: 1.45; }
+.conf { margin: 14px 0 0; font-size: 12.5px; color: var(–ink-3); }
+
+.scale-key { display: flex; margin-top: 20px; border-top: 1px solid var(–sep); padding-top: 12px; }
+.scale-key div { flex: 1; font-size: 10.5px; color: var(–ink-3); text-align: center; }
+.scale-key div.on { font-weight: 650; }
+.scale-key b { display: block; font-weight: inherit; }
+
+.rows { margin: 0; padding: 0; list-style: none; }
+.rows li { display: grid; grid-template-columns: 1fr auto; gap: 3px 14px; padding: 14px 0; border-top: 1px solid var(–sep); }
+.rows li:first-child { border-top: 0; padding-top: 0; }
+.rows li:last-child { padding-bottom: 0; }
+.r-name { font-size: 15px; font-weight: 500; display: flex; align-items: center; }
+.r-val { font-size: 16px; font-weight: 600; text-align: right; letter-spacing: -0.02em; }
+.r-base { font-size: 12.5px; color: var(–ink-2); }
+.r-tag { text-align: right; font-size: 11.5px; font-weight: 600; white-space: nowrap; align-self: start; }
+.g { color: var(–green); } .a { color: var(–red); } .n { color: var(–ink-3); }
+
+.bar { height: 4px; border-radius: 2px; background: var(–sep); position: relative; margin-top: 8px; grid-column: 1 / -1; }
+.bar i { position: absolute; top: 0; height: 4px; border-radius: 2px; }
+.bar u { position: absolute; top: -2px; left: 50%; width: 1px; height: 8px; background: var(–ink-3); opacity: .5; }
+
+.chart { padding: 16px 0; border-top: 1px solid var(–sep); }
+.chart:first-of-type { border-top: 0; padding-top: 0; }
+.chart:last-child { padding-bottom: 0; }
+.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.ct { font-size: 14.5px; font-weight: 500; }
+.cv { font-size: 18px; font-weight: 650; letter-spacing: -0.024em; }
+.cv span { font-size: 11.5px; font-weight: 400; color: var(–ink-2); }
+.spark { margin-top: 10px; width: 100%; height: 40px; display: block; overflow: visible; }
+.xlabs { display: flex; justify-content: space-between; font-size: 10.5px; color: var(–ink-3); margin-top: 5px; }
+
+.status { padding: 15px 16px; border-radius: var(–r-in); background: var(–inset);
+font-size: 13.5px; line-height: 1.5; color: var(–ink-2); }
+.status + .status { margin-top: 8px; }
+.status b { color: var(–ink); font-weight: 600; }
+.status.warn b { color: var(–amber); }
+
+footer { margin-top: 6px; font-size: 11.5px; color: var(–ink-3); line-height: 1.55; }
+footer p { margin: 0 0 5px; }
+
+:focus-visible { outline: 2px solid var(–blue); outline-offset: 3px; border-radius: 8px; }
+</style>
+
+</head>
+<body>
+<main class="app">
+
+  <header class="top">
+    <h1>Readiness</h1>
+    <p class="sub num" id="date">—</p>
+  </header>
+
+  <section aria-label="Score">
+    <div class="card hero">
+      <div class="dial">
+        <svg viewBox="0 0 190 112" role="img" id="dialSvg" aria-label="Readiness dial">
+          <path d="M18 96 A77 77 0 0 1 172 96" fill="none" stroke="var(--sep)" stroke-width="13" stroke-linecap="round"/>
+          <path id="arc" d="M18 96 A77 77 0 0 1 172 96" fill="none" stroke="var(--blue)" stroke-width="13" stroke-linecap="round"/>
+        </svg>
+        <div class="dial-read"><div class="s num" id="score">—</div></div>
+      </div>
+      <p class="cat" id="cat">—</p>
+      <p class="sayso" id="sayso">—</p>
+      <p class="conf" id="conf"></p>
+
+```
+  <div class="scale-key" id="bands" aria-hidden="true">
+    <div><b>0–2</b>Recover</div>
+    <div><b>3–4</b>Pace</div>
+    <div><b>5–7</b>Ready</div>
+    <div><b>8–10</b>Go</div>
+  </div>
+</div>
+```
+
+  </section>
+
+  <section aria-labelledby="s2">
+    <h2 class="sechead" id="s2">Why
+      <button class="info" type="button" aria-expanded="false" aria-controls="p-why" aria-label="How this is calculated">i</button>
+    </h2>
+    <div class="card">
+      <div class="panel" id="p-why" hidden style="margin-top:0;margin-bottom:16px">
+        <p>Each signal is compared with your own trailing baseline — every value in the series except the most recent. HRV is log-transformed because its distribution is skewed. z-scores are capped at ±2.5 so one strange night can't dominate.</p>
+        <p>Respiratory rate counts only when <b>raised</b>; breathing slower than usual is not a penalty. Sleep is capped at +1.5, because a long night after a deficit is rebound rather than surplus.</p>
+        <p><b>The weights are heuristic, not validated.</b> Missing signals are dropped and the rest renormalised, rather than scored as neutral. Trust the band, not the decimal.</p>
+      </div>
+      <ul class="rows" id="contrib"></ul>
+    </div>
+  </section>
+
+  <section aria-labelledby="s3">
+    <h2 class="sechead" id="s3">Recent history</h2>
+    <div class="card" id="charts"></div>
+  </section>
+
+  <section aria-labelledby="s4">
+    <h2 class="sechead" id="s4">Data</h2>
+    <div id="statusHost"></div>
+  </section>
+
+  <footer>
+    <p>Compares each signal with your own recent baseline. Heuristic weights, not a validated instrument.</p>
+    <p>For informational use only. Not a medical device and not a diagnosis. If you feel unwell, that outranks the number.</p>
+  </footer>
+
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ── model ─────────────────────────────────────────────
+     sign  +1 higher is better, −1 higher is worse
+     log   log-transform before standardising
+     pos   only upward deviation counts against you
+     cap   ceiling on a favourable z
+     load  use the 7-day mean rather than a single day      */
+  var METRICS = [
+    { k:"hrv", name:"Heart rate variability", unit:"ms",     w:0.35, sign:+1, log:true, dp:1 },
+    { k:"rhr", name:"Resting heart rate",     unit:"bpm",    w:0.25, sign:-1, dp:0 },
+    { k:"slp", name:"Sleep",                  unit:"",       w:0.20, sign:+1, cap:1.5, fmt:"hm" },
+    { k:"rr",  name:"Respiratory rate",       unit:"br/min", w:0.10, sign:-1, pos:true, dp:2 },
+    { k:"tmp", name:"Wrist temperature",      unit:"°C",     w:0.05, sign:-1, pos:true, dp:2 },
+    { k:"exm", name:"Training load",          unit:"min/day",w:0.05, sign:-1, load:true, dp:0 }
+  ];
+
+  var BANDS = [
+    { max:2.9,  label:"Recover",       c:"red",
+      say:"Rest or very light movement. The signals point to incomplete recovery." },
+    { max:4.9,  label:"Pace Yourself", c:"amber",
+      say:"Keep it easy. Technique work, a walk, or a session well short of failure." },
+    { max:7.9,  label:"Ready",         c:"blue",
+      say:"Normal training is reasonable. Nothing is flagging unusually." },
+    { max:10,   label:"Go For It",     c:"green",
+      say:"Everything is at or above baseline. A harder session is well supported." }
+  ];
+
+  /* ── parsing ───────────────────────────────────────────
+     Accepts a real array, or a comma/space/newline separated
+     string, which is what Shortcuts produces by default.    */
+  function toSeries(raw) {
+    var arr;
+    if (Array.isArray(raw)) arr = raw;
+    else if (typeof raw === "string") arr = raw.split(/[,;\s]+/);
+    else if (typeof raw === "number") arr = [raw];
+    else return [];
+
+    return arr.map(function (v) {
+      if (v === null || v === undefined) return null;
+      var s = String(v).trim();
+      if (!s || /^(null|nan|n\/a|-|—)$/i.test(s)) return null;
+      var n = parseFloat(s);
+      return isFinite(n) ? n : null;
+    }).filter(function (v) { return v !== null; });
+  }
+
+  function mean(a) { return a.reduce(function (s, v) { return s + v; }, 0) / a.length; }
+  function sd(a) {
+    if (a.length < 2) return 0;
+    var m = mean(a);
+    return Math.sqrt(a.reduce(function (s, v) { return s + (v - m) * (v - m); }, 0) / (a.length - 1));
+  }
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+  function fmt(m, v) {
+    if (v === null || v === undefined || !isFinite(v)) return "—";
+    if (m.fmt === "hm") {
+      var h = Math.floor(v), mn = Math.round((v - h) * 60);
+      if (mn === 60) { h += 1; mn = 0; }
+      return h + " h " + (mn < 10 ? "0" : "") + mn + " m";
+    }
+    return v.toFixed(m.dp === undefined ? 1 : m.dp);
+  }
+
+  /* ── payload ─────────────────────────────────────────── */
+  var SAMPLE = {
+    rr:"15.65384615384615, 16.5, 15.84, 15.30882352941176, 15.73863636363636, 15.87704918032787, 15.93137254901961, 15.7421875, 15.72, 15.98936170212766, 16.08333333333333, 16.19090909090909, 15.87903225806452, 16.21428571428572, 15.27272727272727, 15.8828125, 16.0530303030303, 15.88461538461539, 16.35294117647059, 16.3515625, 15.71641791044776, 15.70175438596491, 15.98360655737705, 16.19444444444444, 15.72727272727273, 17.17692307692308, 16.04166666666667, 15.95967741935484, 15.59, 15.43548387096774",
+    hrv:"52.22418525315943, 57.45577674428716, 41.98236550146471, 41.10597758939873, 40.71344236161767, 45.54028994519084, 48.55973540227696, 40.085960825686, 42.84490343713506, 55.87728617329915, 41.08014960724946, 43.59361160417418, 41.41007987082947, 43.71447318377663, 39.30283321821014, 39.32516846468304, 40.39566256000623, 51.21036472483195, 45.7160067297506, 41.73510324055336, 36.15105080183363, 49.21807572519643, 47.21480564080846, 33.61522532115849, 33.32443890067275, 39.75191734177352, 52.31688242086486, 55.21756508289948, 38.57776152559199, 41.35599523242729",
+    rhr:"53, 52, 49, 51, 53, 52, 49, 49, 50, 51, 53, 52, 53, 52, 53, 55, 53, 51, 51, 52, 50, 53, 56, 55, 52, 53, 54, 54, 53, 55",
+    slp:"6.15604361156622, 7.38394153667821, 5.28489076786571, 6.09811142891646, 8.37130273477899, 7.74892779568831, 9.66535950342814, 6.9110146974855, 6.67031677087148, 7.54966668605804, 8.64493503623539, 8.77764535698626, 6.38825459616052, 8.59249688843886, 7.50015915552775, 8.30492036756542, 8.49553923692968, 4.3723686458336, 6.30544093029367, 10.5859852899114, 8.34622685925828, 9.01002662602398, 4.31411572330528, 5.81587680058347, 6.40484634247091, 8.8689580771327, 9.50781969332033, 7.34210919913318, 9.91423016577959"
+  };
+
+  /* The Shortcut replaces the token below with the contents of ready.json.
+     Leave it exactly as written — Replace Text matches on it literally.   */
+  var INLINE = /*__DATA__*/null/*__END__*/;
+
+  function readPayload() {
+    var h = location.hash.replace(/^#/, "");
+    if (!h) return null;
+    var tries = [
+      function () { return JSON.parse(decodeURIComponent(escape(atob(decodeURIComponent(h))))); },
+      function () { return JSON.parse(atob(h)); },
+      function () { return JSON.parse(decodeURIComponent(h)); },
+      function () { return JSON.parse(h); }
+    ];
+    for (var i = 0; i < tries.length; i++) {
+      try { var o = tries[i](); if (o && typeof o === "object") return o; } catch (e) {}
+    }
+    return null;
+  }
+
+  var payload = (INLINE && typeof INLINE === "object") ? INLINE : readPayload();
+  var isSample = !payload;
+  var data = payload || SAMPLE;
+
+  /* ── compute ─────────────────────────────────────────── */
+  var results = [], absent = [], thin = [], lengths = [];
+  var weighted = 0, totalW = 0;
+
+  METRICS.forEach(function (m) {
+    var s = toSeries(data[m.k]);
+    if (s.length < 8) { if (s.length) thin.push(m.name); else absent.push(m.name); return; }
+
+    lengths.push({ name: m.name, n: s.length });
+
+    var today = s[s.length - 1],
+        base  = s.slice(0, -1),
+        bMean, bSd, z;
+
+    if (m.log) {
+      var ln = base.map(Math.log), lnM = mean(ln);
+      bMean = Math.exp(lnM); bSd = sd(ln);
+      z = bSd > 0 ? (Math.log(today) - lnM) / bSd : 0;
+    } else {
+      bMean = mean(base); bSd = sd(base);
+      z = bSd > 0 ? (today - bMean) / bSd : 0;
+    }
+
+    if (m.load) {
+      var recent = mean(s.slice(-7));
+      z = bSd > 0 ? (recent - bMean) / bSd : 0;
+      today = recent;
+    }
+
+    var rawZ = z;
+    z = clamp(z, -2.5, 2.5);
+    var capped = null;
+    if (m.pos && z < 0) { capped = "pos"; z = 0; }
+    if (m.cap && z > m.cap) { capped = "cap"; z = m.cap; }
+
+    var contrib = m.sign * z * m.w;
+    weighted += contrib; totalW += m.w;
+
+    results.push({ m:m, today:today, base:bMean, sd:bSd, z:z, rawZ:rawZ,
+                   capped:capped, contrib:contrib, series:s });
+  });
+
+  var composite = totalW > 0 ? weighted / totalW : null;
+  var score = composite === null ? null : clamp(5 + 2.0 * composite, 0, 10);
+  var band = null;
+  if (score !== null) for (var i = 0; i < BANDS.length; i++) if (score <= BANDS[i].max) { band = BANDS[i]; break; }
+
+  /* ── render ──────────────────────────────────────────── */
+  var $ = function (id) { return document.getElementById(id); };
+
+  var dateTxt;
+  if (data.date) {
+    var d = new Date(data.date + "T12:00:00");
+    dateTxt = isNaN(d) ? String(data.date)
+            : d.toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" });
+  } else {
+    dateTxt = "Latest reading · no date supplied";
+  }
+  $("date").textContent = dateTxt;
+
+  if (score === null) {
+    $("cat").textContent = "Not enough data";
+    $("sayso").textContent = "At least one signal needs eight or more values before a score can be calculated.";
+  } else {
+    $("score").innerHTML = score.toFixed(1) + '<small>/10</small>';
+    $("cat").textContent = band.label;
+    $("cat").style.color = "var(--" + band.c + ")";
+    $("sayso").textContent = band.say;
+    $("conf").textContent = results.length + " of " + METRICS.length + " signals · " +
+      (results.length >= 5 ? "high" : results.length >= 4 ? "moderate" : "low") + " confidence";
+
+    var arc = $("arc");
+    arc.setAttribute("stroke", "var(--" + band.c + ")");
+    var L = arc.getTotalLength();
+    arc.setAttribute("stroke-dasharray", L);
+    arc.setAttribute("stroke-dashoffset", (L * (1 - score / 10)).toFixed(2));
+    $("dialSvg").setAttribute("aria-label", "Readiness " + score.toFixed(1) + " out of 10, " + band.label);
+
+    var cell = $("bands").children[BANDS.indexOf(band)];
+    cell.classList.add("on");
+    cell.style.color = "var(--" + band.c + ")";
+  }
+
+  /* contributors, largest drag first */
+  var host = $("contrib");
+  results.slice().sort(function (a, b) { return a.contrib - b.contrib; }).forEach(function (r) {
+    var m = r.m,
+        dir = r.contrib < -0.015 ? "a" : r.contrib > 0.015 ? "g" : "n",
+        tag = r.contrib < -0.015 ? "Lowering" : r.contrib > 0.015 ? "Raising" : "Neutral",
+        col = dir === "a" ? "red" : dir === "g" ? "green" : "ink-3",
+        pid = "p-" + m.k,
+        pct = clamp(Math.abs(r.contrib) * 110, 0, 50),
+        left = r.contrib < 0 ? 50 - pct : 50;
+
+    var delta = m.log
+      ? ((r.today / r.base - 1) * 100).toFixed(0) + "% vs baseline"
+      : (r.today >= r.base ? "+" : "−") + fmt(m, Math.abs(r.today - r.base)) + " vs baseline";
+
+    var why = delta + ". Weight " + m.w.toFixed(2) + (m.log ? ", log-transformed" : "") + ".";
+    if (r.capped === "pos") why += " Raw z was " + r.rawZ.toFixed(2) +
+      ", but only raised values count against you, so this scored zero.";
+    if (r.capped === "cap") why += " Raw z was " + r.rawZ.toFixed(2) +
+      ", capped at +" + m.cap + " — a long night after a deficit is rebound, not surplus.";
+    if (m.load) why += " Uses the 7-day mean against the full baseline, not one day.";
+
+    var li = document.createElement("li");
+    li.innerHTML =
+      '<span class="r-name">' + m.name +
+        '<button class="info" type="button" aria-expanded="false" aria-controls="' + pid + '" aria-label="Detail">i</button></span>' +
+      '<span class="r-val num">' + fmt(m, r.today) + (m.unit ? " " + m.unit : "") + '</span>' +
+      '<span class="r-base num">Baseline ' + fmt(m, r.base) + ' · z ' + (r.z >= 0 ? "+" : "") + r.z.toFixed(2) + '</span>' +
+      '<span class="r-tag ' + dir + '">' + tag + '</span>' +
+      '<div class="bar"><u></u><i style="background:var(--' + col + ');left:' + left + '%;width:' + pct + '%"></i></div>' +
+      '<div class="panel" id="' + pid + '" hidden><p>' + why + '</p></div>';
+    host.appendChild(li);
+  });
+
+  /* sparklines, in model order */
+  var W = 380, H = 40, P = 4, chost = $("charts");
+  results.forEach(function (r) {
+    var s = r.series, mn = Math.min.apply(null, s), mx = Math.max.apply(null, s),
+        span = (mx - mn) || 1, d = "", lx = 0, ly = 0, i, x, y;
+    for (i = 0; i < s.length; i++) {
+      x = (i / (s.length - 1)) * W;
+      y = P + (1 - (s[i] - mn) / span) * (H - P * 2);
+      d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+      lx = x; ly = y;
+    }
+    var el = document.createElement("div");
+    el.className = "chart";
+    el.innerHTML =
+      '<div class="chart-head"><span class="ct">' + r.m.name + '</span>' +
+      '<span class="cv num">' + fmt(r.m, s[s.length - 1]) +
+      (r.m.unit ? ' <span>' + r.m.unit + '</span>' : '') + '</span></div>' +
+      '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' +
+        r.m.name + ' over ' + s.length + ' readings, most recent ' + fmt(r.m, s[s.length - 1]) + '.">' +
+        '<path d="' + d + '" fill="none" stroke="var(--ink-3)" stroke-width="1.8" stroke-linecap="round" ' +
+        'stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+        '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.8" fill="var(--ink)"/></svg>' +
+      '<div class="xlabs num" aria-hidden="true"><span>' + s.length + ' readings ago</span><span>Latest</span></div>';
+    chost.appendChild(el);
+  });
+
+  /* status */
+  var sh = $("statusHost");
+  function addStatus(html, warn) {
+    var d = document.createElement("div");
+    d.className = "status" + (warn ? " warn" : "");
+    d.innerHTML = html;
+    sh.appendChild(d);
+  }
+
+  if (isSample) addStatus("<b>Showing sample data.</b> Run the Shortcut to load your own readings.");
+
+  addStatus("<b>" + results.length + " of " + METRICS.length + "</b> signals used" +
+    (absent.length ? ", missing " + absent.join(", ") + "." : ".") +
+    " Weights renormalised across those present, rather than scoring absent signals as neutral.");
+
+  if (thin.length) addStatus("<b>Too few readings</b> for " + thin.join(", ") +
+    ". A baseline needs at least eight values.", true);
+
+  var ns = lengths.map(function (l) { return l.n; }),
+      uniq = ns.filter(function (v, i, a) { return a.indexOf(v) === i; });
+  if (uniq.length > 1) {
+    addStatus("<b>Series lengths differ:</b> " +
+      lengths.map(function (l) { return l.name.toLowerCase() + " " + l.n; }).join(", ") +
+      ". The last value in each is treated as the most recent. If they don't all end on the same day, the score is comparing readings from different dates.", true);
+  }
+
+  if (!data.date) addStatus("<b>No date in the payload.</b> There is no way to tell whether these readings are from this morning or a stale run. Add a date key to the Shortcut output.", true);
+
+  /* disclosure */
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest(".info") : null;
+    if (!b) return;
+    var p = document.getElementById(b.getAttribute("aria-controls"));
+    if (!p) return;
+    var open = b.getAttribute("aria-expanded") === "true";
+    b.setAttribute("aria-expanded", open ? "false" : "true");
+    p.hidden = open;
+  });
+})();
+</script>
+
+</body>
+</html>
