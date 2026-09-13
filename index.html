@@ -74,7 +74,7 @@ section { margin-bottom: 30px; }
 .card { background: var(--card); border-radius: var(--r-card); padding: var(--gutter); }
 .card + .card { margin-top: 12px; }
 
-/* animated gradient ring — needs @property to interpolate an angle */
+/* animated gradient ring — needs @property to interpolate an angle - thanks aniakubow */
 @property --a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
 @keyframes spin { to { --a: 360deg; } }
 
