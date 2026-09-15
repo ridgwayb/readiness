@@ -74,7 +74,7 @@ section { margin-bottom: 30px; }
 .card { background: var(--card); border-radius: var(--r-card); padding: var(--gutter); }
 .card + .card { margin-top: 12px; }
 
-/* animated gradient ring — needs @property to interpolate an angle - thanks aniakubow */
+/* animated gradient ring — needs @property to interpolate an angle */
 @property --a { syntax: "<angle>"; initial-value: 0deg; inherits: false; }
 @keyframes spin { to { --a: 360deg; } }
 
@@ -222,21 +222,74 @@ footer p { margin: 0 0 5px; }
 (function () {
   "use strict";
 
-  /* ── model ─────────────────────────────────────────────
-     sign  +1 higher is better, −1 higher is worse
-     log   log-transform before standardising
-     pos   only upward deviation counts against you
-     cap   ceiling on a favourable z
-     load  use the 7-day mean rather than a single day      */
+  // ==================================================================
+  //  READINESS — daily recovery score from personal baselines
+  //
+  //  Data flow:
+  //    Shortcut reads Health  ->  JSON  ->  base64  ->  URL fragment
+  //    this page decodes it, computes z-scores, renders
+  //
+  //  Nothing is sent to a server. A URL fragment (the part after #) is
+  //  never transmitted in the HTTP request, so the payload stays on the
+  //  device even though the page itself is hosted.
+  // ==================================================================
+
+
+  // ------------------------------------------------------------------
+  //  1. PHYSIOLOGICAL PLAUSIBILITY LIMITS
+  //
+  //  A watch that loses battery, loses skin contact, or fails to sync
+  //  will often emit 0 rather than nothing at all. Scored naively, a
+  //  0 degree wrist temperature reads as a catastrophic drop and would
+  //  dominate the entire composite.
+  //
+  //  So every value is range-checked before use. Anything outside these
+  //  bounds is treated as ABSENT, not as data.
+  //
+  //  Note on tmp: Apple Watch measures wrist SKIN temperature, which
+  //  runs 1-2 degrees below core. A genuine fever might push it to
+  //  37-38; it will not reach the low 40s. Below 30 or above 40 is a
+  //  device fault, not a person.
+  //
+  //  Note on exm: 0 is a VALID value here — it means a rest day. This
+  //  is the only metric where zero is real, which is why limits are
+  //  per-metric rather than a blanket "reject zero" rule.
+  // ------------------------------------------------------------------
+  var PLAUSIBLE = {
+    hrv: [3, 300],     // ms (SDNN). Below 3 is noise, above 300 is artefact
+    rhr: [25, 120],    // bpm. 25 allows for a highly trained resting rate
+    slp: [0.5, 16],    // hours. 0 means "not recorded", not "did not sleep"
+    rr:  [4, 40],      // breaths/min. Outside this is incompatible with sleep
+    tmp: [30, 40],     // degrees C, wrist skin — see note above
+    exm: [0, 1440]     // minutes. 0 is legitimate; 1440 is a full day
+  };
+
+
+  // ------------------------------------------------------------------
+  //  2. THE MODEL
+  //
+  //  sign  +1 = higher is better (HRV), -1 = higher is worse (RHR)
+  //  w     weight. Heuristic, NOT validated coefficients. They reflect
+  //        the relative strength of evidence per signal, nothing more.
+  //  log   log-transform before standardising. HRV is right-skewed, so
+  //        a raw z-score overstates high values and understates low ones.
+  //  pos   only UPWARD deviation counts against you. Breathing slower or
+  //        running cooler than usual is not a problem.
+  //  band  score against an absolute healthy range instead of the
+  //        personal baseline. Used for sleep — see section 6.
+  //  load  use the 7-day mean rather than a single day. Training load
+  //        accumulates; one hard session is not the same as a hard week.
+  // ------------------------------------------------------------------
   var METRICS = [
     { k:"hrv", name:"Heart rate variability", unit:"ms",     w:0.35, sign:+1, log:true, dp:1 },
     { k:"rhr", name:"Resting heart rate",     unit:"bpm",    w:0.25, sign:-1, dp:0 },
     { k:"slp", name:"Sleep",                  unit:"",       w:0.20, sign:+1, band:[7,9], fmt:"hm" },
     { k:"rr",  name:"Respiratory rate",       unit:"br/min", w:0.10, sign:-1, pos:true, dp:2 },
-    { k:"tmp", name:"Wrist temperature",      unit:"°C",     w:0.05, sign:-1, pos:true, dp:2 },
+    { k:"tmp", name:"Wrist temperature",      unit:"C",      w:0.05, sign:-1, pos:true, dp:2 },
     { k:"exm", name:"Training load",          unit:"min/day",w:0.05, sign:-1, load:true, dp:0 }
   ];
 
+  // Band thresholds are an analytical convention, not a clinical standard.
   var BANDS = [
     { max:2.9,  label:"Recover",       c:"red",
       say:"Rest or very light movement. The signals point to incomplete recovery." },
@@ -248,35 +301,58 @@ footer p { margin: 0 0 5px; }
       say:"Everything is at or above baseline. A harder session is well supported." }
   ];
 
-  /* ── parsing ───────────────────────────────────────────
-     Accepts a real array, or a comma/space/newline separated
-     string, which is what Shortcuts produces by default.    */
-  function toSeries(raw) {
-    var arr;
-    if (Array.isArray(raw)) arr = raw;
+
+  // ------------------------------------------------------------------
+  //  3. PARSING
+  //
+  //  Shortcuts emits "1, 2, 3" as a STRING, not a JSON array, so both
+  //  forms are accepted.
+  //
+  //  Critically, this preserves POSITION. An earlier version filtered
+  //  nulls out, which silently shifted every later value one place
+  //  earlier — so if one day failed to record, the "most recent" value
+  //  was actually yesterday's. Bad values become null IN PLACE.
+  // ------------------------------------------------------------------
+  function parseSeries(raw, key) {
+    var arr, limits = PLAUSIBLE[key] || [-Infinity, Infinity];
+
+    if (Array.isArray(raw))           arr = raw;
     else if (typeof raw === "string") arr = raw.split(/[,;\s]+/);
     else if (typeof raw === "number") arr = [raw];
-    else return [];
+    else return { values: [], rejected: 0 };
 
-    return arr.map(function (v) {
+    var rejected = 0;
+    var values = arr.map(function (v) {
       if (v === null || v === undefined) return null;
-      var s = String(v).trim();
-      if (!s || /^(null|nan|n\/a|-|—)$/i.test(s)) return null;
-      var n = parseFloat(s);
-      return isFinite(n) ? n : null;
-    }).filter(function (v) { return v !== null; });
+      var str = String(v).trim();
+      if (!str || /^(null|nan|n\/a|-|--)$/i.test(str)) return null;
+
+      var n = parseFloat(str);
+      if (!isFinite(n)) return null;
+
+      // the plausibility gate
+      if (n < limits[0] || n > limits[1]) { rejected++; return null; }
+      return n;
+    });
+
+    return { values: values, rejected: rejected };
   }
 
+  function present(a) { return a.filter(function (v) { return v !== null; }); }
   function mean(a) { return a.reduce(function (s, v) { return s + v; }, 0) / a.length; }
+
+  // Sample standard deviation (n-1). We are estimating the spread of a
+  // population from a sample of days, not describing those days alone.
   function sd(a) {
     if (a.length < 2) return 0;
     var m = mean(a);
     return Math.sqrt(a.reduce(function (s, v) { return s + (v - m) * (v - m); }, 0) / (a.length - 1));
   }
+
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 
   function fmt(m, v) {
-    if (v === null || v === undefined || !isFinite(v)) return "—";
+    if (v === null || v === undefined || !isFinite(v)) return "-";
     if (m.fmt === "hm") {
       var h = Math.floor(v), mn = Math.round((v - h) * 60);
       if (mn === 60) { h += 1; mn = 0; }
@@ -285,7 +361,17 @@ footer p { margin: 0 0 5px; }
     return v.toFixed(m.dp === undefined ? 1 : m.dp);
   }
 
-  /* ── payload ─────────────────────────────────────────── */
+
+  // ------------------------------------------------------------------
+  //  4. PAYLOAD
+  //
+  //  Three sources, in priority order:
+  //    1. INLINE  — injected by a Shortcut into the file itself
+  //    2. #hash   — passed in the URL fragment
+  //    3. SAMPLE  — real historical data, so the page is never blank
+  // ------------------------------------------------------------------
+  var INLINE = /*__DATA__*/null/*__END__*/;
+
   var SAMPLE = {
     rr:"15.65384615384615, 16.5, 15.84, 15.30882352941176, 15.73863636363636, 15.87704918032787, 15.93137254901961, 15.7421875, 15.72, 15.98936170212766, 16.08333333333333, 16.19090909090909, 15.87903225806452, 16.21428571428572, 15.27272727272727, 15.8828125, 16.0530303030303, 15.88461538461539, 16.35294117647059, 16.3515625, 15.71641791044776, 15.70175438596491, 15.98360655737705, 16.19444444444444, 15.72727272727273, 17.17692307692308, 16.04166666666667, 15.95967741935484, 15.59, 15.43548387096774",
     hrv:"52.22418525315943, 57.45577674428716, 41.98236550146471, 41.10597758939873, 40.71344236161767, 45.54028994519084, 48.55973540227696, 40.085960825686, 42.84490343713506, 55.87728617329915, 41.08014960724946, 43.59361160417418, 41.41007987082947, 43.71447318377663, 39.30283321821014, 39.32516846468304, 40.39566256000623, 51.21036472483195, 45.7160067297506, 41.73510324055336, 36.15105080183363, 49.21807572519643, 47.21480564080846, 33.61522532115849, 33.32443890067275, 39.75191734177352, 52.31688242086486, 55.21756508289948, 38.57776152559199, 41.35599523242729",
@@ -293,10 +379,7 @@ footer p { margin: 0 0 5px; }
     slp:"6.15604361156622, 7.38394153667821, 5.28489076786571, 6.09811142891646, 8.37130273477899, 7.74892779568831, 9.66535950342814, 6.9110146974855, 6.67031677087148, 7.54966668605804, 8.64493503623539, 8.77764535698626, 6.38825459616052, 8.59249688843886, 7.50015915552775, 8.30492036756542, 8.49553923692968, 4.3723686458336, 6.30544093029367, 10.5859852899114, 8.34622685925828, 9.01002662602398, 4.31411572330528, 5.81587680058347, 6.40484634247091, 8.8689580771327, 9.50781969332033, 7.34210919913318, 9.91423016577959"
   };
 
-  /* The Shortcut replaces the token below with the contents of ready.json.
-     Leave it exactly as written — Replace Text matches on it literally.   */
-  var INLINE = /*__DATA__*/null/*__END__*/;
-
+  // Shortcuts' encoding varies with action order, so try the likely forms.
   function readPayload() {
     var h = location.hash.replace(/^#/, "");
     if (!h) return null;
@@ -318,88 +401,146 @@ footer p { margin: 0 0 5px; }
   var isSample = !payload;
   var data = payload || SAMPLE;
 
-  /* ── compute ─────────────────────────────────────────── */
-  var results = [], absent = [], thin = [], lengths = [];
+
+  // ------------------------------------------------------------------
+  //  5. COMPUTE
+  // ------------------------------------------------------------------
+  var results = [],       // metrics that scored
+      absent = [],        // key not supplied at all
+      thin = [],          // supplied but baseline too short
+      invalidToday = [],  // latest reading missing or implausible
+      rejects = [],       // out-of-range values found and discarded
+      lengths = [];
+
   var weighted = 0, totalW = 0;
 
   METRICS.forEach(function (m) {
-    var s = toSeries(data[m.k]);
-    if (s.length < 8) { if (s.length) thin.push(m.name); else absent.push(m.name); return; }
+    var parsed = parseSeries(data[m.k], m.k),
+        series = parsed.values;                 // nulls preserved in position
 
-    lengths.push({ name: m.name, n: s.length });
+    if (parsed.rejected > 0) rejects.push(m.name + " (" + parsed.rejected + ")");
 
-    var today = s[s.length - 1],
-        base  = s.slice(0, -1),
-        bMean, bSd, z;
+    if (!series.length) { absent.push(m.name); return; }
+
+    // The LAST element is today. If it failed the plausibility check the
+    // metric is dropped entirely — we do NOT silently fall back to
+    // yesterday, and we do NOT substitute the baseline mean. Inventing a
+    // value that scores as neutral would look like data but be fiction.
+    var today = series[series.length - 1];
+    if (today === null) { invalidToday.push(m.name); return; }
+
+    var base = present(series.slice(0, -1));
+    if (base.length < 8) { thin.push(m.name); return; }
+
+    lengths.push({ name: m.name, n: present(series).length });
+
+    var bMean, bSd, z;
 
     if (m.log) {
+      // HRV is right-skewed: a fall from 60 to 45 is not the same size of
+      // event as a fall from 30 to 15. Working in log space makes the
+      // z-score proportional rather than absolute.
       var ln = base.map(Math.log), lnM = mean(ln);
-      bMean = Math.exp(lnM); bSd = sd(ln);
+      bMean = Math.exp(lnM);                    // geometric mean, for display
+      bSd = sd(ln);
       z = bSd > 0 ? (Math.log(today) - lnM) / bSd : 0;
     } else {
-      bMean = mean(base); bSd = sd(base);
+      bMean = mean(base);
+      bSd = sd(base);
       z = bSd > 0 ? (today - bMean) / bSd : 0;
     }
 
     if (m.load) {
-      var recent = mean(s.slice(-7));
+      // Acute load: last 7 days against the full baseline. A single heavy
+      // day is not the same stimulus as a heavy week.
+      var recent = mean(present(series.slice(-7)));
       z = bSd > 0 ? (recent - bMean) / bSd : 0;
       today = recent;
     }
 
     var rawZ = z, inBand = null;
 
+    // --------------------------------------------------------------
+    //  6. HEALTH-RANGE SCORING (sleep)
+    //
+    //  Personal baselines are right for HRV and resting HR — neither
+    //  has a meaningful population "correct" value. Sleep is different:
+    //  there IS an absolute healthy range, and scoring it against your
+    //  own average would reward a chronically short sleeper for another
+    //  short night.
+    //
+    //  The asymmetry is deliberate. Short sleep is robustly associated
+    //  with worse outcomes. Long sleep is associated too, but much of
+    //  that link is reverse causation — illness causes long sleep — so
+    //  it carries HALF the penalty rather than an equal one.
+    // --------------------------------------------------------------
     if (m.band) {
-      /* Health-range scoring. Short sleep is robustly adverse. Long sleep is
-         adverse too, but much of that association is reverse causation — being
-         unwell causes long sleep — so it carries half the penalty.           */
       var lo = m.band[0], hi = m.band[1];
       if (today < lo)      { z = (today - lo) / (bSd || 1); inBand = "under"; }
       else if (today > hi) { z = -((today - hi) / (bSd || 1)) * 0.5; inBand = "over"; }
       else                 { z = 0.5; inBand = "in"; }
     }
 
+    // Cap at 2.5 SD so one strange night cannot dominate the composite.
     z = clamp(z, -2.5, 2.5);
+
     var capped = null;
+    // Directional metrics: only a rise counts against you.
     if (m.pos && z < 0) { capped = "pos"; z = 0; }
-    if (m.cap && z > m.cap) { capped = "cap"; z = m.cap; }
 
     var contrib = m.sign * z * m.w;
-    weighted += contrib; totalW += m.w;
+    weighted += contrib;
+    totalW += m.w;
 
-    results.push({ m:m, today:today, base:bMean, sd:bSd, z:z, rawZ:rawZ, inBand:inBand,
-                   capped:capped, contrib:contrib, series:s });
+    results.push({ m:m, today:today, base:bMean, sd:bSd, z:z, rawZ:rawZ,
+                   inBand:inBand, capped:capped, contrib:contrib, series:series });
   });
 
+  // Renormalise across the metrics that actually scored. A dropped metric
+  // must not quietly count as neutral — that would pull every score
+  // toward 5.0 and hide the fact that data is missing.
   var composite = totalW > 0 ? weighted / totalW : null;
-  var score = composite === null ? null : clamp(5 + 2.0 * composite, 0, 10);
-  var band = null;
-  if (score !== null) for (var i = 0; i < BANDS.length; i++) if (score <= BANDS[i].max) { band = BANDS[i]; break; }
 
-  /* ── render ──────────────────────────────────────────── */
+  // Linear map: z of 0 -> 5.0, each SD moves the score by 2 points.
+  // The factor of 2.0 is a presentation choice, not a derived constant.
+  var score = composite === null ? null : clamp(5 + 2.0 * composite, 0, 10);
+
+  var band = null;
+  if (score !== null) {
+    for (var i = 0; i < BANDS.length; i++) {
+      if (score <= BANDS[i].max) { band = BANDS[i]; break; }
+    }
+  }
+
+
+  // ------------------------------------------------------------------
+  //  7. RENDER
+  // ------------------------------------------------------------------
   var $ = function (id) { return document.getElementById(id); };
 
   var dateTxt;
   if (data.date) {
-    var d = new Date(data.date + "T12:00:00");
+    var d = new Date(data.date + "T12:00:00");   // midday avoids timezone rollover
     dateTxt = isNaN(d) ? String(data.date)
             : d.toLocaleDateString("en-GB", { weekday:"long", day:"numeric", month:"long" });
   } else {
-    dateTxt = "Latest reading · no date supplied";
+    dateTxt = "Latest reading - no date supplied";
   }
   $("date").textContent = dateTxt;
 
   if (score === null) {
     $("cat").textContent = "Not enough data";
-    $("sayso").textContent = "At least one signal needs eight or more values before a score can be calculated.";
+    $("sayso").textContent = "At least one signal needs eight or more valid readings before a score can be calculated.";
+    $("glow").style.setProperty("--accent", "var(--ink-3)");
   } else {
     $("score").innerHTML = score.toFixed(1) + '<small>/10</small>';
     $("cat").textContent = band.label;
     $("cat").style.color = "var(--" + band.c + ")";
     $("sayso").textContent = band.say;
-    $("conf").textContent = results.length + " of " + METRICS.length + " signals · " +
+    $("conf").textContent = results.length + " of " + METRICS.length + " signals - " +
       (results.length >= 5 ? "high" : results.length >= 4 ? "moderate" : "low") + " confidence";
 
+    // Draw the arc by offsetting its own dash pattern.
     var arc = $("arc");
     arc.setAttribute("stroke", "var(--" + band.c + ")");
     var L = arc.getTotalLength();
@@ -414,9 +555,7 @@ footer p { margin: 0 0 5px; }
     $("glow").style.setProperty("--accent", "var(--" + band.c + ")");
   }
 
-  if (score === null) { $("glow").style.setProperty("--accent", "var(--ink-3)"); }
-
-  /* contributors, largest drag first */
+  // Contributors, ordered by how much each moved the score — biggest drag first.
   var host = $("contrib");
   results.slice().sort(function (a, b) { return a.contrib - b.contrib; }).forEach(function (r) {
     var m = r.m,
@@ -427,21 +566,25 @@ footer p { margin: 0 0 5px; }
         pct = clamp(Math.abs(r.contrib) * 110, 0, 50),
         left = r.contrib < 0 ? 50 - pct : 50;
 
-    /* what the metric itself did, stated in its own terms rather than the score's */
+    // Two separate facts, deliberately not conflated:
+    //   "state" = what the METRIC did
+    //   "tag"   = what it did to the SCORE
+    // A rising resting heart rate and a falling HRV both drag the score
+    // down, so both are red — but they moved in opposite directions.
     var state;
-    if (r.inBand === "in")         state = "Within the healthy range";
-    else if (r.inBand === "under") state = "Below the healthy range";
-    else if (r.inBand === "over")  state = "Above the healthy range";
+    if (r.inBand === "in")           state = "Within the healthy range";
+    else if (r.inBand === "under")   state = "Below the healthy range";
+    else if (r.inBand === "over")    state = "Above the healthy range";
     else if (Math.abs(r.rawZ) < 0.5) state = "Close to your usual";
     else state = (r.today > r.base ? "Higher" : "Lower") + " than your usual";
 
     var delta = m.log
       ? ((r.today / r.base - 1) * 100).toFixed(0) + "% vs baseline"
-      : (r.today >= r.base ? "+" : "−") + fmt(m, Math.abs(r.today - r.base)) + " vs baseline";
+      : (r.today >= r.base ? "+" : "-") + fmt(m, Math.abs(r.today - r.base)) + " vs baseline";
 
     var why = state + ". " + delta + ". Weight " + m.w.toFixed(2) +
               (m.log ? ", log-transformed" : "") + ".";
-    if (m.band) why += " Sleep is scored against a healthy range of " + m.band[0] + "–" + m.band[1] +
+    if (m.band) why += " Sleep is scored against a healthy range of " + m.band[0] + "-" + m.band[1] +
       " hours, not against more-is-better. Falling short counts fully; sleeping well over counts at " +
       "half weight, since long sleep is often a consequence of being unwell rather than a cause of harm.";
     if (r.capped === "pos") why += " Raw z was " + r.rawZ.toFixed(2) +
@@ -453,24 +596,38 @@ footer p { margin: 0 0 5px; }
       '<span class="r-name">' + m.name +
         '<button class="info" type="button" aria-expanded="false" aria-controls="' + pid + '" aria-label="Detail">i</button></span>' +
       '<span class="r-val num">' + fmt(m, r.today) + (m.unit ? " " + m.unit : "") + '</span>' +
-      '<span class="r-base num">' + state + ' · baseline ' + fmt(m, r.base) + '</span>' +
+      '<span class="r-base num">' + state + ' - baseline ' + fmt(m, r.base) + '</span>' +
       '<span class="r-tag ' + dir + '">' + tag + '</span>' +
       '<div class="bar"><u></u><i style="background:var(--' + col + ');left:' + left + '%;width:' + pct + '%"></i></div>' +
       '<div class="panel" id="' + pid + '" hidden><p>' + why + '</p></div>';
     host.appendChild(li);
   });
 
-  /* sparklines, in model order */
+  // Sparklines. Gaps (nulls) break the line rather than being bridged —
+  // drawing straight through missing days would imply data that isn't there.
   var W = 380, H = 40, P = 4, chost = $("charts");
   results.forEach(function (r) {
-    var s = r.series, mn = Math.min.apply(null, s), mx = Math.max.apply(null, s),
-        span = (mx - mn) || 1, d = "", lx = 0, ly = 0, i, x, y;
+    var s = r.series,
+        vals = present(s),
+        mn = Math.min.apply(null, vals),
+        mx = Math.max.apply(null, vals),
+        span = (mx - mn) || 1,
+        segs = [], cur = "", lx = 0, ly = 0, i, x, y;
+
     for (i = 0; i < s.length; i++) {
+      if (s[i] === null) { if (cur) { segs.push(cur); cur = ""; } continue; }
       x = (i / (s.length - 1)) * W;
       y = P + (1 - (s[i] - mn) / span) * (H - P * 2);
-      d += (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+      cur += (cur === "" ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1);
       lx = x; ly = y;
     }
+    if (cur) segs.push(cur);
+
+    var d = segs.map(function (seg) {
+      return '<path d="' + seg + '" fill="none" stroke="var(--ink-3)" stroke-width="1.8" ' +
+             'stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>';
+    }).join("");
+
     var el = document.createElement("div");
     el.className = "chart";
     el.innerHTML =
@@ -478,31 +635,36 @@ footer p { margin: 0 0 5px; }
       '<span class="cv num">' + fmt(r.m, s[s.length - 1]) +
       (r.m.unit ? ' <span>' + r.m.unit + '</span>' : '') + '</span></div>' +
       '<svg class="spark" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' +
-        r.m.name + ' over ' + s.length + ' readings, most recent ' + fmt(r.m, s[s.length - 1]) + '.">' +
-        '<path d="' + d + '" fill="none" stroke="var(--ink-3)" stroke-width="1.8" stroke-linecap="round" ' +
-        'stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
-        '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.8" fill="var(--ink)"/></svg>' +
+        r.m.name + ' over ' + vals.length + ' valid readings, most recent ' + fmt(r.m, s[s.length - 1]) + '.">' +
+        d + '<circle cx="' + lx.toFixed(1) + '" cy="' + ly.toFixed(1) + '" r="2.8" fill="var(--ink)"/></svg>' +
       '<div class="xlabs num" aria-hidden="true"><span>' + s.length + ' readings ago</span><span>Latest</span></div>';
     chost.appendChild(el);
   });
 
-  /* status */
+
+  // ------------------------------------------------------------------
+  //  8. STATUS — the page must never fail silently
+  //
+  //  Every exclusion is reported. A score computed on four signals
+  //  instead of six is still useful, but only if you know that is what
+  //  you are looking at.
+  // ------------------------------------------------------------------
   var sh = $("statusHost");
   function addStatus(html, warn) {
-    var d = document.createElement("div");
-    d.className = "status" + (warn ? " warn" : "");
-    d.innerHTML = html;
-    sh.appendChild(d);
+    var el = document.createElement("div");
+    el.className = "status" + (warn ? " warn" : "");
+    el.innerHTML = html;
+    sh.appendChild(el);
   }
 
-  /* key-level diagnostic: names the problem instead of failing silently */
   if (payload) {
-    var known = METRICS.map(function (m) { return m.k; }).concat(["date", "v"]);
+    var known = METRICS.map(function (m) { return m.k; }).concat(["date", "v", "theme"]);
     var seen = Object.keys(payload);
     var report = seen.map(function (k) {
-      var n = toSeries(payload[k]).length;
-      var isKnown = known.indexOf(k) !== -1;
-      return (isKnown ? "" : "⚠ ") + k + " (" + (k === "date" || k === "v" ? String(payload[k]) : n + " values") + ")";
+      var n = present(parseSeries(payload[k], k).values).length;
+      var ok = known.indexOf(k) !== -1;
+      return (ok ? "" : "! ") + k + " (" +
+             (k === "date" || k === "v" ? String(payload[k]) : n + " valid") + ")";
     });
     var unknown = seen.filter(function (k) { return known.indexOf(k) === -1; });
     var lacking = METRICS.filter(function (m) { return seen.indexOf(m.k) === -1; })
@@ -511,45 +673,58 @@ footer p { margin: 0 0 5px; }
     addStatus("<b>Keys received:</b> " + report.join(", ") + ".", unknown.length > 0);
 
     if (unknown.length) addStatus("<b>Unrecognised key" + (unknown.length > 1 ? "s" : "") +
-      ": " + unknown.join(", ") + ".</b> The page only reads hrv, rhr, slp, rr, tmp, exm, date and v. " +
-      "Check spelling and capitalisation in the Shortcut — keys are case-sensitive.", true);
+      ": " + unknown.join(", ") + ".</b> The page reads hrv, rhr, slp, rr, tmp, exm, date and v. " +
+      "Keys are case-sensitive.", true);
 
     if (lacking.length) addStatus("<b>Absent from the payload:</b> " + lacking.join(", ") + ".");
   }
 
+  if (rejects.length) addStatus("<b>Implausible readings discarded:</b> " + rejects.join(", ") +
+    ". Values outside physiological limits are treated as device faults, not measurements. " +
+    "A wrist temperature of 0 means the sensor failed, not that you were freezing.", true);
+
+  if (invalidToday.length) addStatus("<b>Latest reading unusable for:</b> " + invalidToday.join(", ") +
+    ". Those signals were dropped rather than substituted - no value was invented to fill the gap.", true);
+
   if (decodeFailed) addStatus("<b>A payload arrived but could not be decoded.</b> " +
-    location.hash.length + " characters were received. Check that Base64 Encode has " +
-    "Line Breaks set to None, and that URL Encode runs after it.", true);
-  else if (isSample) addStatus("<b>Showing sample data.</b> No payload reached the page. " +
-    "Run the Shortcut, or check that the URL text has no space between the # and the variable.", true);
+    location.hash.length + " characters received. Check Base64 Encode has Line Breaks set to None, " +
+    "and that URL Encode runs after it.", true);
+  else if (isSample) addStatus("<b>Showing sample data.</b> No payload reached the page.", true);
 
-  addStatus("Rendered at <b>" + new Date().toLocaleTimeString("en-GB",
-    { hour: "2-digit", minute: "2-digit", second: "2-digit" }) + "</b>. " +
-    "If this time does not change when you re-run the Shortcut, the page was not reloaded.");
-
-  addStatus("<b>" + results.length + " of " + METRICS.length + "</b> signals used" +
-    (absent.length ? ", missing " + absent.join(", ") + "." : ".") +
-    " Weights renormalised across those present, rather than scoring absent signals as neutral.");
+  addStatus("<b>" + results.length + " of " + METRICS.length + "</b> signals used. " +
+    "Weights renormalised across those present, rather than scoring absent signals as neutral.");
 
   if (thin.length) addStatus("<b>Too few readings</b> for " + thin.join(", ") +
-    ". A baseline needs at least eight values.", true);
+    ". A baseline needs at least eight valid values.", true);
 
   var ns = lengths.map(function (l) { return l.n; }),
       uniq = ns.filter(function (v, i, a) { return a.indexOf(v) === i; });
   if (uniq.length > 1) {
     addStatus("<b>Series lengths differ:</b> " +
       lengths.map(function (l) { return l.name.toLowerCase() + " " + l.n; }).join(", ") +
-      ". The last value in each is treated as the most recent. If they don't all end on the same day, the score is comparing readings from different dates.", true);
+      ". The last value in each is treated as the most recent. If they do not all end on the " +
+      "same day, the score compares readings from different dates.", true);
   }
 
-  if (!data.date) addStatus("<b>No date in the payload.</b> There is no way to tell whether these readings are from this morning or a stale run. Add a date key to the Shortcut output.", true);
+  if (!data.date) addStatus("<b>No date in the payload.</b> There is no way to tell whether these " +
+    "readings are from this morning or a stale run.", true);
 
-  /* Safari does not reload when only the fragment changes, so the script
-     would never re-run with a new payload. Force it. Same for bfcache. */
+  addStatus("Rendered at <b>" + new Date().toLocaleTimeString("en-GB",
+    { hour:"2-digit", minute:"2-digit", second:"2-digit" }) + "</b>. " +
+    "If this does not change when you re-run the Shortcut, the page was not reloaded.");
+
+
+  // ------------------------------------------------------------------
+  //  9. INTERACTION
+  //
+  //  Safari does not reload when only the fragment changes, so a new
+  //  payload would render the OLD score. Force a reload.
+  // ------------------------------------------------------------------
   window.addEventListener("hashchange", function () { location.reload(); });
   window.addEventListener("pageshow", function (e) { if (e.persisted) location.reload(); });
 
-  /* disclosure */
+  // One delegated handler for every info button - panels are created
+  // dynamically, so binding individually would miss them.
   document.addEventListener("click", function (e) {
     var b = e.target.closest ? e.target.closest(".info") : null;
     if (!b) return;
